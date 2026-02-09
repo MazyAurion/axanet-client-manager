@@ -1,0 +1,119 @@
+name: "Axanet - Crear cliente"
+
+on:
+  workflow_dispatch:
+    inputs:
+      nombre:
+        description: "Nombre del cliente"
+        required: true
+        type: string
+      contacto:
+        description: "Contacto (opcional)"
+        required: false
+        type: string
+      servicio:
+        description: "Servicio solicitado"
+        required: true
+        type: string
+      descripcion:
+        description: "Descripción del servicio"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  TEAM_MEMBERS: "@MazyAurion"
+
+jobs:
+  crear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Ejecutar acción (crear cliente)
+        run: |
+          python actions_cli.py crear \
+            --nombre "${{ inputs.nombre }}" \
+            --contacto "${{ inputs.contacto }}" \
+            --servicio "${{ inputs.servicio }}" \
+            --descripcion "${{ inputs.descripcion }}"
+
+      - name: Commit en rama y push
+        id: commit_step
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+
+          BRANCH="actions/crear-${{ github.run_id }}"
+          echo "BRANCH=$BRANCH" >> $GITHUB_OUTPUT
+
+          git checkout -b "$BRANCH"
+          git add clientes data || true
+          git add . || true
+
+          if git diff --cached --quiet; then
+            echo "NO_CHANGES=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          git commit -m "Crear cliente: ${{ inputs.nombre }}"
+          git push -u origin "$BRANCH"
+          echo "NO_CHANGES=false" >> $GITHUB_OUTPUT
+
+      - name: Crear PR automático
+        if: ${{ steps.commit_step.outputs.NO_CHANGES == 'false' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = "${{ steps.commit_step.outputs.BRANCH }}";
+            const title = `Crear cliente: ${{ inputs.nombre }}`;
+            const body = [
+              `${process.env.TEAM_MEMBERS}`,
+              ``,
+              `**Acción:** Creación de nuevo cliente`,
+              `**Cliente:** ${{ inputs.nombre }}`,
+              `**Servicio:** ${{ inputs.servicio }}`,
+              ``,
+              `Este PR fue generado automáticamente por GitHub Actions.`
+            ].join("\n");
+
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              head: branch,
+              base: "main",
+              body
+            });
+
+            core.notice(`PR creado: #${pr.data.number}`);
+
+      - name: Notificar al equipo (Issue)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Notificación: Cliente creado (${ { } })`.replace("(${ { } })", "${{ inputs.nombre }}");
+            const body = [
+              `${process.env.TEAM_MEMBERS}`,
+              ``,
+              `Se creó un **nuevo cliente**.`,
+              `- Cliente: **${{ inputs.nombre }}**`,
+              `- Servicio: **${{ inputs.servicio }}**`,
+              ``,
+              `Revisar el Pull Request generado por Actions (si aplica).`
+            ].join("\n");
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body
+            });
